@@ -17,7 +17,7 @@ The sensitization of trigeminal ganglion neurons contributes to primary headache
 
 ## Data availability
 -   [GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE197289)
--   [Trigeminal Ganglion Cell Atlas] (https://painseq.shinyapps.io/tg-painseq/)
+-   [Trigeminal Ganglion Cell Atlas](https://painseq.shinyapps.io/tg-painseq/)
 
 
 ## Cite our paper
