@@ -1,0 +1,122 @@
+library(Seurat)
+library(dplyr)
+library(grid)
+library(gridExtra)
+library(tibble)
+library(ggplot2)
+
+setwd('./Working/Mouse_human_TG')
+
+pc_num=20
+min_genes=1000
+res=1.5
+
+# read in counts table first
+counts = Read10X(data.dir = "counts/20210522_hTG_HSV-1-LAT_RNA_aggregate/outs/count/filtered_feature_bc_matrix")
+seurat_mat = CreateSeuratObject(counts = counts, project = "Human_TG", min.cells = 3, min.features = min_genes)
+
+# make dirctory to save data
+dir = paste0(format(Sys.time(),"%Y%m%d"),"_human_TG_level1_raw_",min_genes,"_",res)
+dir.create(dir)
+setwd(dir)
+
+# calculate mitohondrial genes for each cell
+seurat_mat[["percent.mt"]] <- PercentageFeatureSet(seurat_mat, pattern = "^MT-")
+seurat_mat <- subset(seurat_mat, subset = nFeature_RNA < 15000 & percent.mt < 5)
+
+# plot QC
+pdf(paste0("VinPlot_QC.pdf"),heigh=12,width=12)
+VlnPlot(seurat_mat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+dev.off()
+
+# Normalize data, normalization.method = "LogNormalize", scale.factor = 10000
+seurat_mat <- NormalizeData(seurat_mat)
+
+# ID variable genes, selection.method = "vst", nfeatures = 2000
+seurat_mat <- FindVariableFeatures(seurat_mat)
+
+# scale data
+seurat_mat <- ScaleData(object = seurat_mat, vars.to.regress = c("nCount_RNA", "percent.mt"))
+
+# PCA
+seurat_mat <- RunPCA(seurat_mat, features = VariableFeatures(object = seurat_mat),verbose=F)
+
+# dimension reduction and cluster
+seurat_mat <- FindNeighbors(seurat_mat, dims = 1:pc_num)
+seurat_mat <- FindClusters(seurat_mat, resolution = res)
+print(levels(Idents(seurat_mat)))
+
+# visualization
+seurat_mat <- RunTSNE(seurat_mat, dims = 1:pc_num)
+seurat_mat <- RunUMAP(seurat_mat, dims = 1:pc_num)
+
+seurat_mat = AddMetaData(seurat_mat,Embeddings(seurat_mat[["tsne"]]),colnames(Embeddings(seurat_mat[["tsne"]])))
+seurat_mat = AddMetaData(seurat_mat,Embeddings(seurat_mat[["umap"]]),colnames(Embeddings(seurat_mat[["umap"]])))
+
+pdf("tSNE.pdf")
+DimPlot(seurat_mat, reduction = "tsne",label = T)
+dev.off()
+
+pdf("UMAP.pdf")
+DimPlot(seurat_mat, reduction = "umap",label = T)
+dev.off()
+
+pdf(paste0("tSNE_HSV1.LAT.pdf"),heigh=8,width=8)
+FeaturePlot(seurat_mat, 'HSV-1-LAT',reduction='tsne',coord.fixed=T)
+dev.off()
+
+pdf(paste0("tSNE_QC.pdf"),heigh=12,width=12)
+FeaturePlot(seurat_mat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),reduction='tsne',coord.fixed=T)
+dev.off()
+
+pdf(paste0("UMAP_QC.pdf"),heigh=12,width=12)
+FeaturePlot(seurat_mat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),reduction='umap',coord.fixed=T)
+dev.off()
+
+
+markers =list(c('Rbfox3','Sparc'),
+        c('Fam19a4','Th'), #cLTMR
+        c('Tac1',"Gpx3","Cartpt","Hpca","Trpm8"), #PEP
+        c("Cd55","Mrgprd","Lpar3"), #NP
+        c("Htr3a","Cplx2","Nptx1","Nefh","Hapln4","Pvalb","Cadps2","Ntrk2"), #NF
+        c("Nppb","Sst","Il31ra"), #SST
+        c('Apoe','Fabp7','Ednrb'),#Satglia
+        c('Scn7a'),#Schwann_N
+        c('Mpz','Mbp'),#Schwann_M,
+        c('Pecam1','Cldn5'),#endothelial
+        c('Pdgfrb','Notch3'),#Pericyte
+        c('Dcn','Mgp','Pdgfra','Ngfr','Alpl'),#fibroblast
+        c('Lyz2','Mrc1'),#macrophage
+        c('S100a8','Retnlg'),#neutrophil
+        c('Cd79a')#B cell
+         )
+
+
+# plot markers
+dir.create('FeaturePlot')
+index=0
+for (i in markers)
+{
+    index=index+1
+    i=toupper(i)
+    i=i[i %in% rownames(seurat_mat)]
+  if(length(i)==0){
+    next()
+  }
+  print(i)
+    pdf(paste0("FeaturePlot/FeaturePlot_tSNE_",index,".pdf"),heigh=ceiling(length(i)/2)*4,width=8)
+    grid.draw(FeaturePlot(seurat_mat, i,reduction='tsne'))
+    dev.off()
+
+    pdf(paste0("FeaturePlot/FeaturePlot_UMAP_",index,".pdf"),heigh=ceiling(length(i)/2)*4,width=8)
+    grid.draw(FeaturePlot(seurat_mat, i,reduction='umap'))
+    dev.off()
+}
+
+# save files
+data.table::fwrite(seurat_mat@meta.data,file='meta.data.csv',row.names=TRUE)
+saveRDS(seurat_mat, file = "Seurat.Rds")
+
+# find markers on a small subset to improve efficiency
+clusterMarkers <- FindAllMarkers(seurat_mat, only.pos = F, min.pct = 0.1, thresh.use = 0.5)
+write.csv(clusterMarkers, file = "clusterMarkers.csv")

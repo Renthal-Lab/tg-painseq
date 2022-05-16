@@ -1,0 +1,85 @@
+---
+title: "R Notebook"
+output: none
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r include=FALSE}
+library(dplyr)
+library(Seurat)
+library(grid)
+library(ggplot2)
+library(tibble)
+library(forcats)
+
+# In this script, we are going to identify activated cells by headache models
+# In order to do that, we will:
+# 1. Calculate a IEG score for each cell based on their expression of IEG genes using AddModuleScore() in Seurat
+# 2. Identify activated cells as cells whose IEG scores is > mean(IEG_score)+2*sd(IEG_score) across all cells of the same subtype
+# 3. ANOVA to identify significantly activated subtypes
+
+
+#specify condition,subtype
+subtypes=c("cLTMR","PEP","TRPM8","NP","NF1","NF2","NF3","SST",'Satglia','Schwann_M','Fibroblast_Dcn','Fibroblast_Mgp','Vascular') # schwann_N and Immune are removed because average # per sample < 30
+# standard deviation threshold
+cutoff=2
+
+# load data
+seurat_mat=readRDS('Seurat.rds')
+meta=seurat_mat@meta.data%>%rownames_to_column('V1')
+
+#calculate IEG score
+genes=readRDS('IEGs.rds')
+seurat_mat=AddModuleScore(seurat_mat,list(genes),name = 'IEG_score')
+
+
+# set up IEG score threshold for each subtype
+threshold=meta%>%
+  filter(subtype %in% subtypes)%>%
+  group_by(subtype)%>%
+  summarise(IEG_score1.cutoff=mean(IEG_score1)+cutoff*sd(IEG_score1))
+
+# add threshold back to meta data and identiy activated cells
+data=left_join(meta,threshold)%>%mutate(IEG_act=IEG_score1>=IEG_score1.cutoff)
+
+
+#calculate percentage per library/subtype
+models=c('Naive','CSD','IS')
+
+data=data%>%
+  filter(model %in% models)%>%
+  group_by(model,realtime,library_name,subtype)%>%
+  summarise(n=n(),IEG_pct=sum(IEG_act)/n*100)
+
+# ANOVA test across time points in one injury model for each subtyppe
+p_vals=NULL
+for(i in subtypes){
+  print(i)
+  anova=aov(IEG_pct ~ model, data = data%>%filter(subtype==i,model%in%c('Naive','CSD 1.5h','CSD 6h')))
+  p=TukeyHSD(anova)$model
+  p=p[grepl('Naive',rownames(p)),]%>%
+    data.frame()%>%
+    rownames_to_column('model')%>%
+    mutate(subtype=i,model=stringr::str_remove(model,'-Naive'))
+  p_vals=rbind(p_vals,p)
+}
+
+for(i in subtypes){
+  print(i)
+  anova=aov(IEG_pct ~ model, data = data%>%filter(subtype==i,model%in%c('Naive','IS 1h','IS 6h','IS 24h')))
+  p=TukeyHSD(anova)$model
+  p=p[grepl('Naive',rownames(p)),]%>%
+    data.frame()%>%
+    rownames_to_column('model')%>%
+    mutate(subtype=i,model=stringr::str_remove(model,'-Naive'))
+  p_vals=rbind(p_vals,p)
+}
+
+
+
+```
+
+
